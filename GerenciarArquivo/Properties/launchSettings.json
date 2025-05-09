@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "GerenciarArquivo (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "GerenciarArquivo (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
