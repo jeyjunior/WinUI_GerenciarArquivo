@@ -7,9 +7,61 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Title="GerenciarArquivo">
+    Title="Gerenciar Arquivo">
 
-    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-        <Button x:Name="myButton" Click="myButton_Click">Click Me</Button>
-    </StackPanel>
+    <Grid Margin="0" Padding="32" RowSpacing="18" Background="{StaticResource Cinza12}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Origem dos arquivos -->
+        <StackPanel Orientation="Vertical" Spacing="8">
+
+            <TextBlock x:Name="txtSourcePath" VerticalAlignment="Center" HorizontalAlignment="Stretch" Text="Nenhuma pasta selecionada"/>
+            <Button x:Name="btnSelectSource" Content="Selecionar Pasta Origem" Click="btnSelectSource_Click" HorizontalAlignment="Stretch"/>
+
+            <Grid Grid.Row="1" HorizontalAlignment="Right">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="64"/>
+                    <ColumnDefinition Width="64"/>
+                    <ColumnDefinition Width="64"/>
+                </Grid.ColumnDefinitions>
+
+                <CheckBox x:Name="chkJson" Content=".json" IsChecked="True" Grid.Column="0"/>
+                <CheckBox x:Name="chkTxt" Content=".txt" IsChecked="True" Grid.Column="1"/>
+                <CheckBox x:Name="chkXml" Content=".xml" IsChecked="True" Grid.Column="2"/>
+            </Grid>
+        </StackPanel>
+
+        <!-- Lista de arquivos -->
+        <ListView x:Name="lvFiles" Grid.Row="1" Margin="0" Padding="8" Background="{StaticResource Cinza10}" CornerRadius="5">
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <Grid Padding="2,12" Margin="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="64"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0" Text="{Binding Name}" VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="Copiar" 
+                                Click="CopyFile_Click" 
+                                Tag="{Binding FullName}"
+                                Margin="0"/>
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <!-- Destino dos arquivos -->
+        <StackPanel Grid.Row="2" VerticalAlignment="Stretch" HorizontalAlignment="Stretch" Spacing="8">
+            <TextBlock Text="Nome padrão:" VerticalAlignment="Center"/>
+            <TextBox x:Name="txtDefaultName" HorizontalAlignment="Stretch" LostFocus="txtDefaultName_LostFocus"/>
+            <Border Height="4"/>
+            <TextBlock x:Name="txtDestinationPath" VerticalAlignment="Center" Text="Nenhuma pasta selecionada"/>
+            <Button x:Name="btnSelectDestination" Content="Selecionar Pasta Destino" Click="btnSelectDestination_Click" HorizontalAlignment="Stretch"/>
+        </StackPanel>
+    </Grid>
 </Window>
