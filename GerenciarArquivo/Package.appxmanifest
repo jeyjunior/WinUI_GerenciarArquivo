@@ -8,15 +8,15 @@
   IgnorableNamespaces="uap rescap">
 
   <Identity
-    Name="f09fee62-9347-424a-a588-e2c86e5a4f1a"
-    Publisher="CN=jeyjr"
-    Version="1.0.0.0" />
+    Name="JeyJr.GerenciarArquivos"
+    Publisher="CN=53663670-79F2-45CB-8E00-C8EA1BF62707"
+    Version="1.0.1.0" />
 
-  <mp:PhoneIdentity PhoneProductId="f09fee62-9347-424a-a588-e2c86e5a4f1a" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
+  <mp:PhoneIdentity PhoneProductId="b0f2a739-17df-4f25-bb25-a7498c30173a" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
   <Properties>
-    <DisplayName>GerenciarArquivo</DisplayName>
-    <PublisherDisplayName>jeyjr</PublisherDisplayName>
+    <DisplayName>Gerenciar Arquivos</DisplayName>
+    <PublisherDisplayName>JeyJr</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
@@ -34,8 +34,8 @@
       Executable="$targetnametoken$.exe"
       EntryPoint="$targetentrypoint$">
       <uap:VisualElements
-        DisplayName="GerenciarArquivo"
-        Description="GerenciarArquivo"
+        DisplayName="Gerenciar Arquivos"
+        Description="Gerenciar Arquivos"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

@@ -24,6 +24,7 @@ using GerenciarArquivo.Controls;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Diagnostics;
+using JJ.NET.Core.DTO;
 
 namespace GerenciarArquivo
 {
@@ -41,7 +42,7 @@ namespace GerenciarArquivo
             this.InitializeComponent();
 
             AppWindow m_AppWindow = GetAppWindowForCurrentWindow();
-            m_AppWindow.Title = "Gerenciar Arquivos de Parâmetros";
+            m_AppWindow.Title = "Gerenciar Arquivos";
             m_AppWindow.SetIcon("Assets/icone.ico");
             m_AppWindow.Resize(new Windows.Graphics.SizeInt32(600, 600));
 
@@ -91,9 +92,10 @@ namespace GerenciarArquivo
                             arquivos.Add(new FileInfo(file.Path));
                             config.OrigemArquivos.Add(file.Path);
                         }
+                        
+                        await SalvarConfiguracoes();
                     }
 
-                    await SalvarConfiguracoes();
                     CarregarArquivosDaOrigem();
                 }
             }
@@ -176,21 +178,55 @@ namespace GerenciarArquivo
                 await SalvarConfiguracoes();
             }
         }
-        private void btnExcluirArquivo_Click(object sender, RoutedEventArgs e)
+        private async void btnExcluirArquivo_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is Button btn && btn.Tag is string path)
+            try
             {
-                var item = arquivos.FirstOrDefault(f => f.FullName == path);
-                if (item != null)
+                if (sender is Button btn && btn.Tag is string arquivo)
                 {
-                    arquivos.Remove(item);
-                    config.OrigemArquivos.Remove(path);
+                    var item = arquivos.FirstOrDefault(f => f.FullName == arquivo);
+                    if (item != null)
+                    {
+                        arquivos.Remove(item);
+                        config.OrigemArquivos.Remove(arquivo);
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+            }
         }
-        private void btnCopiarArquivo_Click(object sender, RoutedEventArgs e)
+        private async void btnCopiarArquivo_Click(object sender, RoutedEventArgs e)
         {
+            try
+            {
+                if (!await ValidarCaminhoDestino())
+                    return;
 
+                if (sender is Button btn && btn.Tag is string arquivo)
+                {
+                    var arquivoOrigem = new FileInfo(arquivo);
+
+                    if (!arquivoOrigem.Exists)
+                        throw new Exception("Arquivo não existe.");
+
+                    var ret = Copiar(arquivoOrigem);
+
+                    if (await ret)
+                    {
+                        await Mensagem.SucessoAsync("Arquivo copiado com sucesso.", this.Content.XamlRoot);
+                    }
+                    else
+                    {
+                        await Mensagem.ErroAsync("Não foi possível copiar o arquivo para pasta de destino.", this.Content.XamlRoot);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+            }
         }
         private async void btnLimparLista_Click(object sender, RoutedEventArgs e)
         {
@@ -212,17 +248,8 @@ namespace GerenciarArquivo
         {
             try
             {
-                if (config.CaminhoDestino.ObterValorOuPadrao("").Trim() == "")
-                {
-                    await Mensagem.AvisoAsync("Selecione uma pasta de destino antes de continuar.", this.Content.XamlRoot);
+                if (!await ValidarCaminhoDestino())
                     return;
-                }
-
-                if (!Directory.Exists(config.CaminhoDestino))
-                {
-                    await Mensagem.AvisoAsync("A pasta de destino selecionada não foi encontrada.", this.Content.XamlRoot);
-                    return;
-                }
 
                 if (config.OrigemArquivos.Count <= 0)
                 {
@@ -243,21 +270,13 @@ namespace GerenciarArquivo
                         continue;
                     }
 
-                    string nomeArquivoDeDestino = arquivoOrigem.Name;
+                    var ret = Copiar(arquivoOrigem);
 
-                    if (config.NomePadrao.ObterValorOuPadrao("").Trim() != "" && chkNomePadrao.IsChecked == true)
-                        nomeArquivoDeDestino = config.NomePadrao;
-
-                    nomeArquivoDeDestino = nomeArquivoDeDestino + arquivoOrigem.Extension;
-
-                    string destinationPath = Path.Combine(config.CaminhoDestino, nomeArquivoDeDestino);
-
-                    try
+                    if (await ret)
                     {
-                        File.Copy(arquivoOrigem.FullName, destinationPath, overwrite: true);
                         qtdCopiaComSucesso++;
                     }
-                    catch 
+                    else
                     {
                         qtdErros++;
                     }
@@ -282,13 +301,37 @@ namespace GerenciarArquivo
                 await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
             }
         }
-        private void chkNomePadrao_Unchecked(object sender, RoutedEventArgs e)
+        private async void chkNomePadrao_Unchecked(object sender, RoutedEventArgs e)
         {
-            txtNomePadrao.IsEnabled = false;
+            try
+            {
+                txtNomePadrao.IsEnabled = false;
+                config.HabilitarNomePadrao = false;
+            }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+            }
+            finally
+            {
+                await SalvarConfiguracoes();
+            }
         }
-        private void chkNomePadrao_Checked(object sender, RoutedEventArgs e)
+        private async void chkNomePadrao_Checked(object sender, RoutedEventArgs e)
         {
-            txtNomePadrao.IsEnabled = true;
+            try
+            {
+                txtNomePadrao.IsEnabled = true;
+                config.HabilitarNomePadrao = true;
+            }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+            }
+            finally
+            {
+                await SalvarConfiguracoes();
+            }
         }
         #endregion
 
@@ -304,6 +347,7 @@ namespace GerenciarArquivo
                         CaminhoDestino = "",
                         NomePadrao = "",
                         OrigemArquivos = new List<string>(),
+                        HabilitarNomePadrao = false,
                     };
 
                     await File.WriteAllTextAsync(_configFilePath, JsonSerializer.Serialize(defaultConfig));
@@ -378,12 +422,52 @@ namespace GerenciarArquivo
         {
             txtCaminhoDestino.Text = config.CaminhoDestino.ObterValorOuPadrao("Nenhuma pasta selecionada").Trim();
             txtNomePadrao.Text = config.NomePadrao.ObterValorOuPadrao("").Trim();
+            chkNomePadrao.IsChecked= config.HabilitarNomePadrao;
+            txtNomePadrao.IsEnabled = config.HabilitarNomePadrao;
         }
         private AppWindow GetAppWindowForCurrentWindow()
         {
             IntPtr hWnd = WindowNative.GetWindowHandle(this);
             WindowId wndId = Win32Interop.GetWindowIdFromWindow(hWnd);
             return AppWindow.GetFromWindowId(wndId);
+        }
+        private async Task<bool> Copiar(FileInfo arquivoOrigem)
+        {
+            string nomeArquivoDeDestino = arquivoOrigem.Name;
+
+            if (config.NomePadrao.ObterValorOuPadrao("").Trim() != "" && chkNomePadrao.IsChecked == true)
+                nomeArquivoDeDestino = config.NomePadrao;
+
+            if (!nomeArquivoDeDestino.EndsWith(arquivoOrigem.Extension, StringComparison.OrdinalIgnoreCase))
+                nomeArquivoDeDestino += arquivoOrigem.Extension;
+
+            string destinationPath = Path.Combine(config.CaminhoDestino, nomeArquivoDeDestino);
+
+            try
+            {
+                File.Copy(arquivoOrigem.FullName, destinationPath, overwrite: true);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        private async Task<bool> ValidarCaminhoDestino()
+        {
+            if (config.CaminhoDestino.ObterValorOuPadrao("").Trim() == "")
+            {
+                await Mensagem.AvisoAsync("Selecione uma pasta de destino antes de continuar.", this.Content.XamlRoot);
+                return false;
+            }
+
+            if (!Directory.Exists(config.CaminhoDestino))
+            {
+                await Mensagem.AvisoAsync("A pasta de destino selecionada não foi encontrada.", this.Content.XamlRoot);
+                return false;
+            }
+
+            return true;
         }
         private void AtualizarStatus()
         {
@@ -397,5 +481,6 @@ namespace GerenciarArquivo
         public List<string> OrigemArquivos { get; set; } = new List<string>();
         public string CaminhoDestino { get; set; } = "";
         public string NomePadrao { get; set; } = "";
+        public bool HabilitarNomePadrao { get; set; } = false;
     }
 }
