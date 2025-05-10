@@ -34,7 +34,10 @@ namespace GerenciarArquivo.Controls
 
         private static async Task ExibirAsync(string mensagem, TipoDeAviso tipoDeAviso, XamlRoot xamlRoot, int duracaoMS = 3000)
         {
-            if (mensagem.ObterValorOuPadrao("").Trim() == "" || xamlRoot == null)
+            if (xamlRoot == null)
+                return;
+
+            if (mensagem.ObterValorOuPadrao("").Trim() == "")
                 throw new Exception("Falha ao tentar exibir aviso.");
 
             int larguraPopup = 300;

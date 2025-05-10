@@ -1,4 +1,6 @@
 using System;
+using System.Text.Json;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -14,136 +16,64 @@ using Windows.Foundation;
 using Windows.Foundation.Collections;
 using Windows.Storage.Pickers;
 using Windows.Storage;
-
 using Microsoft.UI;           
 using Microsoft.UI.Windowing; 
 using WinRT.Interop;
 using JJ.NET.Core.Extensoes;
 using GerenciarArquivo.Controls;
-using System.Text.Json;         
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.Diagnostics;
 
 namespace GerenciarArquivo
 {
-    /// <summary>
-    /// An empty window that can be used on its own or navigated to within a Frame.
-    /// </summary>
     public sealed partial class MainWindow : Window
     {
-        private AppWindow m_AppWindow;
-        private AppConfig? config = new AppConfig();
+        #region Propriedades
+        private ObservableCollection<FileInfo> arquivos = new();
         private readonly string _configFilePath;
+        private AppConfig config = new AppConfig();
+        #endregion
 
-
+        #region Construtor
         public MainWindow()
         {
             this.InitializeComponent();
 
-
-            this.m_AppWindow = GetAppWindowForCurrentWindow();
-            this.m_AppWindow.Title = "Gerenciar Arquivos de Parâmetros";
-            this.m_AppWindow.SetIcon("Assets/icone.ico");
-            this.m_AppWindow.Resize(new Windows.Graphics.SizeInt32(600, 600));
+            AppWindow m_AppWindow = GetAppWindowForCurrentWindow();
+            m_AppWindow.Title = "Gerenciar Arquivos de Parâmetros";
+            m_AppWindow.SetIcon("Assets/icone.ico");
+            m_AppWindow.Resize(new Windows.Graphics.SizeInt32(600, 600));
 
             var localFolder = ApplicationData.Current.LocalFolder.Path;
             _configFilePath = Path.Combine(localFolder, "config.json");
 
-            LoadConfig();
-        }
+            arquivos.CollectionChanged += Arquivos_CollectionChanged;
+            lvFiles.ItemsSource = arquivos;
 
-        private AppWindow GetAppWindowForCurrentWindow()
+            CarregarConfiguracoes();
+        }
+        #endregion
+
+        #region Eventos 
+        private void Arquivos_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
         {
-            IntPtr hWnd = WindowNative.GetWindowHandle(this);
-            WindowId wndId = Win32Interop.GetWindowIdFromWindow(hWnd);
-            return AppWindow.GetFromWindowId(wndId);
+            txtQtdTotal.Text = $"Total: {arquivos.Count}";
         }
-
-        private async void LoadConfig()
-        {
-            try
-            {
-                if (!File.Exists(_configFilePath))
-                {
-                    var defaultConfig = new AppConfig
-                    {
-                        SourceFolderPath = string.Empty,
-                        DestinationFolderPath = string.Empty,
-                        DefaultFileName = string.Empty,
-                        FilterJson = true,
-                        FilterTxt = true,
-                        FilterXml = true
-                    };
-
-                    await File.WriteAllTextAsync(_configFilePath, JsonSerializer.Serialize(defaultConfig));
-                }
-
-                // Lê e desserializa o arquivo JSON
-                var json = await File.ReadAllTextAsync(_configFilePath);
-                config = JsonSerializer.Deserialize<AppConfig>(json);
-
-                config ??= new AppConfig();
-
-                // Pastas
-                txtSourcePath.Text = string.IsNullOrEmpty(config.SourceFolderPath)
-                    ? "Nenhuma pasta selecionada"
-                    : config.SourceFolderPath;
-
-                txtDestinationPath.Text = string.IsNullOrEmpty(config.DestinationFolderPath)
-                    ? "Nenhuma pasta selecionada"
-                    : config.DestinationFolderPath;
-
-                // Nome padrão
-                txtDefaultName.Text = config.DefaultFileName ?? "";
-
-                // Filtros
-                chkJson.IsChecked = config.FilterJson;
-                chkTxt.IsChecked = config.FilterTxt;
-                chkXml.IsChecked = config.FilterXml;
-            }
-            catch
-            {
-
-            }
-            finally
-            {
-                LoadFilesFromSource();
-            }
-        }
-        private async void SaveConfig()
-        {
-            try
-            {
-                config ??= new AppConfig();
-
-                config.SourceFolderPath = txtSourcePath.Text == "Nenhuma pasta selecionada" ? "" : txtSourcePath.Text;
-                config.DestinationFolderPath = txtDestinationPath.Text == "Nenhuma pasta selecionada" ? "" : txtDestinationPath.Text;
-                config.DefaultFileName = txtDefaultName.Text;
-                config.FilterJson = chkJson.IsChecked ?? false;
-                config.FilterTxt = chkTxt.IsChecked ?? false;
-                config.FilterXml = chkXml.IsChecked ?? false;
-
-                var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
-                await File.WriteAllTextAsync(_configFilePath, json);
-            }
-            catch
-            {
-
-            }
-        }
-        private async void btnSelectSource_Click(object sender, RoutedEventArgs e)
+        private async void btnSelecionarPastaOrigem_Click(object sender, RoutedEventArgs e)
         {
             try
             {
                 var folderPicker = new FolderPicker();
                 folderPicker.FileTypeFilter.Add("*");
 
-                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-                WinRT.Interop.InitializeWithWindow.Initialize(folderPicker, hwnd);
+                var hwnd = WindowNative.GetWindowHandle(this);
+                InitializeWithWindow.Initialize(folderPicker, hwnd);
 
                 StorageFolder folder = await folderPicker.PickSingleFolderAsync();
 
                 if (folder != null)
                 {
-                    // Verifica se a pasta contém arquivos
                     var files = await folder.GetFilesAsync();
 
                     if (files.Count == 0)
@@ -152,20 +82,59 @@ namespace GerenciarArquivo
                         return;
                     }
 
-                    txtSourcePath.Text = folder.Path;
+                    var folderPath = folder.Path;
+
+                    foreach (var file in files)
+                    {
+                        if (!arquivos.Any(f => f.FullName == file.Path))
+                        {
+                            arquivos.Add(new FileInfo(file.Path));
+                            config.OrigemArquivos.Add(file.Path);
+                        }
+                    }
+
+                    await SalvarConfiguracoes();
+                    CarregarArquivosDaOrigem();
                 }
             }
             catch (Exception ex)
             {
                 await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
             }
-            finally
+        }
+        private async void btnAddArquivo_Click(object sender, RoutedEventArgs e)
+        {
+            try
             {
-                SaveConfig();
-                LoadFilesFromSource();
+                var filePicker = new FileOpenPicker();
+                filePicker.FileTypeFilter.Add("*");
+
+                var hwnd = WindowNative.GetWindowHandle(this);
+                InitializeWithWindow.Initialize(filePicker, hwnd);
+
+                var files = await filePicker.PickMultipleFilesAsync();
+
+                if (files != null && files.Count > 0)
+                {
+                    foreach (var file in files)
+                    {
+                        if (!arquivos.Any(f => f.FullName == file.Path))
+                        {
+                            arquivos.Add(new FileInfo(file.Path));
+                            config.OrigemArquivos.Add(file.Path);
+                        }
+                    }
+
+                    await SalvarConfiguracoes();
+                    CarregarArquivosDaOrigem();
+                }
+            }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
             }
         }
-        private async void btnSelectDestination_Click(object sender, RoutedEventArgs e)
+        private async void btnSelecionarPastaDestino_Click(object sender, RoutedEventArgs e)
         {
             try
             {
@@ -178,7 +147,10 @@ namespace GerenciarArquivo
                 StorageFolder folder = await folderPicker.PickSingleFolderAsync();
 
                 if (folder != null)
-                    txtDestinationPath.Text = folder.Path;
+                {
+                    txtCaminhoDestino.Text = folder.Path;
+                    config.CaminhoDestino = folder.Path;
+                }
             }
             catch (Exception ex)
             {
@@ -186,115 +158,244 @@ namespace GerenciarArquivo
             }
             finally
             {
-                SaveConfig();
+                await SalvarConfiguracoes();
             }
         }
-        private async void LoadFilesFromSource()
+        private async void txtNomePadrao_LostFocus(object sender, RoutedEventArgs e)
         {
             try
             {
-                if (txtSourcePath.Text.ObterValorOuPadrao("").Trim() == "" || txtSourcePath.Text == "Nenhuma pasta selecionada")
-                    return;
-
-                if (!Directory.Exists(txtSourcePath.Text))
-                {
-                    await Mensagem.AvisoAsync("Pasta de origem não encontrada.", this.Content.XamlRoot);
-                    return;
-                }
-
-                // Obtém os filtros selecionados
-                var filters = new List<string>();
-                if (chkJson.IsChecked == true) filters.Add(".json");
-                if (chkTxt.IsChecked == true) filters.Add(".txt");
-                if (chkXml.IsChecked == true) filters.Add(".xml");
-
-                if (!filters.Any())
-                    throw new InvalidOperationException("Nenhum filtro de arquivo selecionado.");
-
-                var directoryInfo = new DirectoryInfo(txtSourcePath.Text);
-                var files = directoryInfo.GetFiles()
-                    .Where(f => filters.Contains(f.Extension.ToLower()))
-                    .OrderBy(f => f.Name)
-                    .ToList();
-
-                if (!files.Any())
-                    throw new FileNotFoundException($"Nenhum arquivo encontrado com os filtros selecionados na pasta: {txtSourcePath.Text}");
-
-                lvFiles.ItemsSource = files;
+                config.NomePadrao = txtNomePadrao.Text.ObterValorOuPadrao("").Trim();
             }
             catch (Exception ex)
             {
                 await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
-                lvFiles.ItemsSource = null;
+            }
+            finally
+            {
+                await SalvarConfiguracoes();
             }
         }
-        private async void CopyFile_Click(object sender, RoutedEventArgs e)
+        private void btnExcluirArquivo_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.Tag is string path)
+            {
+                var item = arquivos.FirstOrDefault(f => f.FullName == path);
+                if (item != null)
+                {
+                    arquivos.Remove(item);
+                    config.OrigemArquivos.Remove(path);
+                }
+            }
+        }
+        private void btnCopiarArquivo_Click(object sender, RoutedEventArgs e)
+        {
+
+        }
+        private async void btnLimparLista_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                if (txtDestinationPath.Text.ObterValorOuPadrao("").Trim() == "" || txtDestinationPath.Text == "Nenhuma pasta selecionada")
-                {
-                    await Mensagem.AvisoAsync("Selecione uma pasta destino primeiro.", this.Content.XamlRoot);
-                    return;
-                }
-
-                if (!Directory.Exists(txtDestinationPath.Text))
-                {
-                    await Mensagem.AvisoAsync("Pasta destino não encontrada.", this.Content.XamlRoot);
-                    return;
-                }
-
-                // Obtém o arquivo de origem do botão clicado
-                var button = sender as Button;
-                if (button?.Tag == null)
-                    return;
-
-                string sourceFilePath = button.Tag.ObterValorOuPadrao("").Trim().ToString();
-                var sourceFile = new FileInfo(sourceFilePath);
-
-                if (!sourceFile.Exists)
-                {
-                    await Mensagem.AvisoAsync("Arquivo origem não encontrado.", this.Content.XamlRoot);
-                    return;
-                }
-
-                string destinationFileName = sourceFile.Name;
-
-                if (txtDefaultName.Text.ObterValorOuPadrao("").Trim() != "")
-                    destinationFileName = txtDefaultName.Text.Trim() + sourceFile.Extension;
-
-                string destinationPath = Path.Combine(txtDestinationPath.Text, destinationFileName);
-
-                File.Copy(sourceFile.FullName, destinationPath, overwrite: true);
-
-                await Mensagem.SucessoAsync($"Arquivo copiado com sucesso!", this.Content.XamlRoot);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                await Mensagem.ErroAsync("Sem permissão para escrever na pasta destino.", this.Content.XamlRoot);
-            }
-            catch (IOException ioEx)
-            {
-                await Mensagem.ErroAsync($"Erro ao copiar arquivo: {ioEx.Message}", this.Content.XamlRoot);
+                config.OrigemArquivos.Clear();
+                arquivos.Clear();
             }
             catch (Exception ex)
             {
-                await Mensagem.ErroAsync($"Erro inesperado: {ex.Message}", this.Content.XamlRoot);
+                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+            }
+            finally
+            {
+                await SalvarConfiguracoes();
             }
         }
-        private void txtDefaultName_LostFocus(object sender, RoutedEventArgs e)
+        private async void btnCopiarLista_Click(object sender, RoutedEventArgs e)
         {
-            SaveConfig();
+            try
+            {
+                if (config.CaminhoDestino.ObterValorOuPadrao("").Trim() == "")
+                {
+                    await Mensagem.AvisoAsync("Selecione uma pasta de destino antes de continuar.", this.Content.XamlRoot);
+                    return;
+                }
+
+                if (!Directory.Exists(config.CaminhoDestino))
+                {
+                    await Mensagem.AvisoAsync("A pasta de destino selecionada não foi encontrada.", this.Content.XamlRoot);
+                    return;
+                }
+
+                if (config.OrigemArquivos.Count <= 0)
+                {
+                    await Mensagem.AvisoAsync("Não há arquivos disponíveis para copiar.", this.Content.XamlRoot);
+                    return;
+                }
+
+                int qtdErros = 0;
+                int qtdCopiaComSucesso = 0;
+
+                foreach (var item in config.OrigemArquivos)
+                {
+                    var arquivoOrigem = new FileInfo(item);
+
+                    if (!arquivoOrigem.Exists)
+                    {
+                        qtdErros++;
+                        continue;
+                    }
+
+                    string nomeArquivoDeDestino = arquivoOrigem.Name;
+
+                    if (config.NomePadrao.ObterValorOuPadrao("").Trim() != "" && chkNomePadrao.IsChecked == true)
+                        nomeArquivoDeDestino = config.NomePadrao;
+
+                    nomeArquivoDeDestino = nomeArquivoDeDestino + arquivoOrigem.Extension;
+
+                    string destinationPath = Path.Combine(config.CaminhoDestino, nomeArquivoDeDestino);
+
+                    try
+                    {
+                        File.Copy(arquivoOrigem.FullName, destinationPath, overwrite: true);
+                        qtdCopiaComSucesso++;
+                    }
+                    catch 
+                    {
+                        qtdErros++;
+                    }
+                }
+
+                if (qtdCopiaComSucesso > 0)
+                {
+                    await Mensagem.SucessoAsync($"{qtdCopiaComSucesso} arquivo(s) copiado(s) com sucesso.", this.Content.XamlRoot);
+                }
+
+                if (qtdErros > 0)
+                {
+                    string msgErro = qtdErros == 1 ? 
+                        "1 arquivo não pôde ser copiado devido a um erro." : 
+                        $"{qtdErros} arquivos não puderam ser copiados devido a erros."; 
+
+                    await Mensagem.ErroAsync(msgErro, this.Content.XamlRoot);
+                }
+            }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+            }
         }
+        private void chkNomePadrao_Unchecked(object sender, RoutedEventArgs e)
+        {
+            txtNomePadrao.IsEnabled = false;
+        }
+        private void chkNomePadrao_Checked(object sender, RoutedEventArgs e)
+        {
+            txtNomePadrao.IsEnabled = true;
+        }
+        #endregion
+
+        #region Metodos
+        private async void CarregarConfiguracoes()
+        {
+            try
+            {
+                if (!File.Exists(_configFilePath))
+                {
+                    var defaultConfig = new AppConfig
+                    {
+                        CaminhoDestino = "",
+                        NomePadrao = "",
+                        OrigemArquivos = new List<string>(),
+                    };
+
+                    await File.WriteAllTextAsync(_configFilePath, JsonSerializer.Serialize(defaultConfig));
+                }
+
+                var json = await File.ReadAllTextAsync(_configFilePath);
+                config = JsonSerializer.Deserialize<AppConfig>(json);
+
+                BindPrincipal();
+                CarregarArquivosDaOrigem();
+            }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+            }
+        }
+        private async void CarregarArquivosDaOrigem()
+        {
+            try
+            {
+                arquivos.Clear();
+                var caminhosInvalidos = new List<string>();
+
+                foreach (var caminho in config.OrigemArquivos)
+                {
+                    if (File.Exists(caminho))
+                    {
+                        arquivos.Add(new FileInfo(caminho));
+                    }
+                    else
+                    {
+                        caminhosInvalidos.Add(caminho);
+                    }
+                }
+
+                if (caminhosInvalidos.Any())
+                {
+                    foreach (var caminho in caminhosInvalidos)
+                        config.OrigemArquivos.Remove(caminho);
+
+                    await SalvarConfiguracoes();
+                }
+
+                if (arquivos.Count == 0)
+                {
+                    await Mensagem.AvisoAsync("Nenhum arquivo válido encontrado nas origens selecionadas.", this.Content.XamlRoot);
+                }
+                else
+                {
+                    await Mensagem.SucessoAsync("Arquivo adicionado com sucesso.", this.Content.XamlRoot);
+                }
+            }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+                arquivos.Clear();
+            }
+        }
+        private async Task SalvarConfiguracoes()
+        {
+            try
+            {
+                var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+                await File.WriteAllTextAsync(_configFilePath, json);
+            }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync($"Erro ao salvar configurações: {ex.Message}", this.Content.XamlRoot);
+            }
+        }
+        private async void BindPrincipal()
+        {
+            txtCaminhoDestino.Text = config.CaminhoDestino.ObterValorOuPadrao("Nenhuma pasta selecionada").Trim();
+            txtNomePadrao.Text = config.NomePadrao.ObterValorOuPadrao("").Trim();
+        }
+        private AppWindow GetAppWindowForCurrentWindow()
+        {
+            IntPtr hWnd = WindowNative.GetWindowHandle(this);
+            WindowId wndId = Win32Interop.GetWindowIdFromWindow(hWnd);
+            return AppWindow.GetFromWindowId(wndId);
+        }
+        private void AtualizarStatus()
+        {
+            txtQtdTotal.Text = arquivos.Count.ToString("N0");
+        }
+        #endregion
     }
 
     public class AppConfig
     {
-        public string SourceFolderPath { get; set; } = "";
-        public string DestinationFolderPath { get; set; } = "";
-        public string DefaultFileName { get; set; } = "";
-        public bool FilterJson { get; set; } = true;
-        public bool FilterTxt { get; set; } = true;
-        public bool FilterXml { get; set; } = true;
+        public List<string> OrigemArquivos { get; set; } = new List<string>();
+        public string CaminhoDestino { get; set; } = "";
+        public string NomePadrao { get; set; } = "";
     }
 }
