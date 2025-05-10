@@ -1,6 +1,6 @@
-# Política de Privacidade do Gerenciador de Arquivos de Parâmetros
+# Política de Privacidade do Gerenciador de Arquivos
 
-**Última atualização:** 08/06/2024  
+**Última atualização:** 10/05/2025  
 
 ## 1. Coleta e Uso de Dados
 
@@ -8,12 +8,8 @@
 
 - **Dados processados:**  
   
-  - Opera exclusivamente em arquivos locais (`.json`, `.txt`, `.xml`) selecionados manualmente pelo usuário.  
-  - Configurações (caminhos de pastas, preferências de filtro) são salvas **apenas no dispositivo** em:  
-    
-    ```
-    %Temp%\GerenciadorParametros_config.json  
-    ```
+  - Opera exclusivamente em arquivos locais selecionados manualmente pelo usuário.  
+  - Configurações (caminhos de pastas, preferências de filtro) são salvas **apenas no dispositivo**.
 
 - **Permissões necessárias:**  
   
@@ -37,6 +33,6 @@
 
 📧 Dúvidas? Entre em contato:  
 
-- [Abrir issue no GitHub](https://github.com/seu-usuario/seu-repositorio/issues)  
+- [Abrir issue no GitHub](https://github.com/jeyjunior/WinUI_GerenciarArquivo/issues)  
   
   
