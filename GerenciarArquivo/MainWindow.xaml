@@ -37,7 +37,7 @@
 
                             <Button x:Name="btnExcluirArquivo" 
                                     Click="btnExcluirArquivo_Click" 
-                                    Grid.Column="0"  Tag="{Binding FullName}" 
+                                    Grid.Column="0"  Tag="{Binding Path}" 
                                     Width="32" Height="32" 
                                     ToolTipService.ToolTip="Remover arquivo da lista" 
                                     Style="{StaticResource AlternateCloseButtonStyle}">
@@ -48,7 +48,7 @@
 
                             <Button x:Name="btnCopiarArquivo" 
                                      Click="btnCopiarArquivo_Click" 
-                                     Grid.Column="2"  Tag="{Binding FullName}" 
+                                     Grid.Column="2"  Tag="{Binding Path}" 
                                      Width="28" Height="28" 
                                      Padding="0"
                                      ToolTipService.ToolTip="Copiar para destino"

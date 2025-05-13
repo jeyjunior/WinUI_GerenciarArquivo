@@ -25,14 +25,15 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Diagnostics;
 using JJ.NET.Core.DTO;
+using Windows.Storage.AccessCache;
 
 namespace GerenciarArquivo
 {
     public sealed partial class MainWindow : Window
     {
         #region Propriedades
-        private ObservableCollection<FileInfo> arquivos = new();
-        private readonly string _configFilePath;
+        private ObservableCollection<FileItem> arquivos = new();
+        private string _configFilePath;
         private AppConfig config = new AppConfig();
         #endregion
 
@@ -40,26 +41,14 @@ namespace GerenciarArquivo
         public MainWindow()
         {
             this.InitializeComponent();
-
-            AppWindow m_AppWindow = GetAppWindowForCurrentWindow();
-            m_AppWindow.Title = "Gerenciar Arquivos";
-            m_AppWindow.SetIcon("Assets/icone.ico");
-            m_AppWindow.Resize(new Windows.Graphics.SizeInt32(600, 600));
-
-            var localFolder = ApplicationData.Current.LocalFolder.Path;
-            _configFilePath = Path.Combine(localFolder, "config.json");
-
-            arquivos.CollectionChanged += Arquivos_CollectionChanged;
-            lvFiles.ItemsSource = arquivos;
-
-            CarregarConfiguracoes();
+            IniciarAppAsync();
         }
         #endregion
 
         #region Eventos 
         private void Arquivos_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
         {
-            txtQtdTotal.Text = $"Total: {arquivos.Count}";
+            txtQtdTotal.Text = "Total: " + arquivos.Count.ToString("N0");
         }
         private async void btnSelecionarPastaOrigem_Click(object sender, RoutedEventArgs e)
         {
@@ -67,41 +56,41 @@ namespace GerenciarArquivo
             {
                 var folderPicker = new FolderPicker();
                 folderPicker.FileTypeFilter.Add("*");
-
-                var hwnd = WindowNative.GetWindowHandle(this);
-                InitializeWithWindow.Initialize(folderPicker, hwnd);
+                InitializeWithWindow.Initialize(folderPicker, WindowNative.GetWindowHandle(this));
 
                 StorageFolder folder = await folderPicker.PickSingleFolderAsync();
 
                 if (folder != null)
                 {
                     var files = await folder.GetFilesAsync();
-
                     if (files.Count == 0)
                     {
                         await Mensagem.AvisoAsync("A pasta selecionada não contém arquivos.", this.Content.XamlRoot);
                         return;
                     }
 
-                    var folderPath = folder.Path;
+                    arquivos.Clear();
+                    config.OrigemArquivos.Clear();
 
                     foreach (var file in files)
                     {
-                        if (!arquivos.Any(f => f.FullName == file.Path))
+                        var futureAccess = StorageApplicationPermissions.FutureAccessList.Add(file);
+                        arquivos.Add(new FileItem
                         {
-                            arquivos.Add(new FileInfo(file.Path));
-                            config.OrigemArquivos.Add(file.Path);
-                        }
-                        
-                        await SalvarConfiguracoes();
+                            Name = file.Name,
+                            Path = file.Path,
+                            FutureAccessToken = futureAccess
+                        });
+                        config.OrigemArquivos.Add(file.Path);
                     }
 
-                    CarregarArquivosDaOrigem();
+                    await SalvarConfiguracoes();
+                    Arquivos_CollectionChanged(null,null);
                 }
             }
             catch (Exception ex)
             {
-                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+                await Mensagem.ErroAsync($"Erro ao selecionar pasta: {ex.Message}", this.Content.XamlRoot);
             }
         }
         private async void btnAddArquivo_Click(object sender, RoutedEventArgs e)
@@ -110,9 +99,7 @@ namespace GerenciarArquivo
             {
                 var filePicker = new FileOpenPicker();
                 filePicker.FileTypeFilter.Add("*");
-
-                var hwnd = WindowNative.GetWindowHandle(this);
-                InitializeWithWindow.Initialize(filePicker, hwnd);
+                InitializeWithWindow.Initialize(filePicker, WindowNative.GetWindowHandle(this));
 
                 var files = await filePicker.PickMultipleFilesAsync();
 
@@ -120,15 +107,21 @@ namespace GerenciarArquivo
                 {
                     foreach (var file in files)
                     {
-                        if (!arquivos.Any(f => f.FullName == file.Path))
+                        if (!arquivos.Any(f => f.Path == file.Path))
                         {
-                            arquivos.Add(new FileInfo(file.Path));
+                            var futureAccess = StorageApplicationPermissions.FutureAccessList.Add(file);
+                            arquivos.Add(new FileItem
+                            {
+                                Name = file.Name,
+                                Path = file.Path,
+                                FutureAccessToken = futureAccess
+                            });
                             config.OrigemArquivos.Add(file.Path);
                         }
                     }
 
                     await SalvarConfiguracoes();
-                    CarregarArquivosDaOrigem();
+                    Arquivos_CollectionChanged(null, null);
                 }
             }
             catch (Exception ex)
@@ -142,9 +135,7 @@ namespace GerenciarArquivo
             {
                 var folderPicker = new FolderPicker();
                 folderPicker.FileTypeFilter.Add("*");
-
-                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-                WinRT.Interop.InitializeWithWindow.Initialize(folderPicker, hwnd);
+                InitializeWithWindow.Initialize(folderPicker, WindowNative.GetWindowHandle(this));
 
                 StorageFolder folder = await folderPicker.PickSingleFolderAsync();
 
@@ -152,43 +143,30 @@ namespace GerenciarArquivo
                 {
                     txtCaminhoDestino.Text = folder.Path;
                     config.CaminhoDestino = folder.Path;
+                    await SalvarConfiguracoes();
                 }
             }
             catch (Exception ex)
             {
                 await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
             }
-            finally
-            {
-                await SalvarConfiguracoes();
-            }
-        }
-        private async void txtNomePadrao_LostFocus(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                config.NomePadrao = txtNomePadrao.Text.ObterValorOuPadrao("").Trim();
-            }
-            catch (Exception ex)
-            {
-                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
-            }
-            finally
-            {
-                await SalvarConfiguracoes();
-            }
         }
         private async void btnExcluirArquivo_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                if (sender is Button btn && btn.Tag is string arquivo)
+                if (sender is Button btn && btn.Tag is string arquivoPath)
                 {
-                    var item = arquivos.FirstOrDefault(f => f.FullName == arquivo);
+                    var item = arquivos.FirstOrDefault(f => f.Path == arquivoPath);
                     if (item != null)
                     {
+                        if (!string.IsNullOrEmpty(item.FutureAccessToken))
+                        {
+                            StorageApplicationPermissions.FutureAccessList.Remove(item.FutureAccessToken);
+                        }
                         arquivos.Remove(item);
-                        config.OrigemArquivos.Remove(arquivo);
+                        config.OrigemArquivos.Remove(arquivoPath);
+                        await SalvarConfiguracoes();
                     }
                 }
             }
@@ -204,28 +182,72 @@ namespace GerenciarArquivo
                 if (!await ValidarCaminhoDestino())
                     return;
 
-                if (sender is Button btn && btn.Tag is string arquivo)
+                if (sender is Button btn && btn.Tag is string arquivoPath)
                 {
-                    var arquivoOrigem = new FileInfo(arquivo);
+                    var item = arquivos.FirstOrDefault(f => f.Path == arquivoPath);
+                    if (item == null) return;
 
-                    if (!arquivoOrigem.Exists)
-                        throw new Exception("Arquivo não existe.");
-
-                    var ret = Copiar(arquivoOrigem);
-
-                    if (await ret)
+                    if (await Copiar(item))
                     {
                         await Mensagem.SucessoAsync("Arquivo copiado com sucesso.", this.Content.XamlRoot);
                     }
                     else
                     {
-                        await Mensagem.ErroAsync("Não foi possível copiar o arquivo para pasta de destino.", this.Content.XamlRoot);
+                        await Mensagem.ErroAsync("Não foi possível copiar o arquivo.", this.Content.XamlRoot);
                     }
                 }
             }
             catch (Exception ex)
             {
                 await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+            }
+        }
+        private async void btnCopiarLista_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (!await ValidarCaminhoDestino())
+                    return;
+
+                if (arquivos.Count == 0)
+                {
+                    await Mensagem.AvisoAsync("Não há arquivos para copiar.", this.Content.XamlRoot);
+                    return;
+                }
+
+                int success = 0, errors = 0;
+
+                foreach (var item in arquivos.ToList())
+                {
+                    if (await Copiar(item)) success++;
+                    else errors++;
+                }
+
+                if (success > 0)
+                    await Mensagem.SucessoAsync($"{success} arquivo(s) copiado(s).", this.Content.XamlRoot);
+
+                if (errors > 0)
+                    await Mensagem.ErroAsync($"{errors} arquivo(s) não puderam ser copiados.", this.Content.XamlRoot);
+            }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+            }
+        }
+
+        private async void txtNomePadrao_LostFocus(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                config.NomePadrao = txtNomePadrao.Text.ObterValorOuPadrao("").Trim();
+            }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
+            }
+            finally
+            {
+                await SalvarConfiguracoes();
             }
         }
         private async void btnLimparLista_Click(object sender, RoutedEventArgs e)
@@ -242,63 +264,6 @@ namespace GerenciarArquivo
             finally
             {
                 await SalvarConfiguracoes();
-            }
-        }
-        private async void btnCopiarLista_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (!await ValidarCaminhoDestino())
-                    return;
-
-                if (config.OrigemArquivos.Count <= 0)
-                {
-                    await Mensagem.AvisoAsync("Não há arquivos disponíveis para copiar.", this.Content.XamlRoot);
-                    return;
-                }
-
-                int qtdErros = 0;
-                int qtdCopiaComSucesso = 0;
-
-                foreach (var item in config.OrigemArquivos)
-                {
-                    var arquivoOrigem = new FileInfo(item);
-
-                    if (!arquivoOrigem.Exists)
-                    {
-                        qtdErros++;
-                        continue;
-                    }
-
-                    var ret = Copiar(arquivoOrigem);
-
-                    if (await ret)
-                    {
-                        qtdCopiaComSucesso++;
-                    }
-                    else
-                    {
-                        qtdErros++;
-                    }
-                }
-
-                if (qtdCopiaComSucesso > 0)
-                {
-                    await Mensagem.SucessoAsync($"{qtdCopiaComSucesso} arquivo(s) copiado(s) com sucesso.", this.Content.XamlRoot);
-                }
-
-                if (qtdErros > 0)
-                {
-                    string msgErro = qtdErros == 1 ? 
-                        "1 arquivo não pôde ser copiado devido a um erro." : 
-                        $"{qtdErros} arquivos não puderam ser copiados devido a erros."; 
-
-                    await Mensagem.ErroAsync(msgErro, this.Content.XamlRoot);
-                }
-            }
-            catch (Exception ex)
-            {
-                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
             }
         }
         private async void chkNomePadrao_Unchecked(object sender, RoutedEventArgs e)
@@ -336,76 +301,134 @@ namespace GerenciarArquivo
         #endregion
 
         #region Metodos
-        private async void CarregarConfiguracoes()
+        private async void IniciarAppAsync()
+        {
+            try
+            {
+                var appWindow = GetAppWindowForCurrentWindow();
+                appWindow.Title = "Gerenciar Arquivos";
+                appWindow.SetIcon("Assets/icone.ico");
+                appWindow.Resize(new Windows.Graphics.SizeInt32(600, 600));
+
+                _configFilePath = Path.Combine(ApplicationData.Current.LocalFolder.Path, "config.json");
+                arquivos.CollectionChanged += Arquivos_CollectionChanged;
+                lvFiles.ItemsSource = arquivos;
+
+                await CarregarConfiguracoesAsync();
+            }
+            catch (Exception ex)
+            {
+                await Mensagem.ErroAsync($"Falha na inicialização: {ex.Message}", this.Content.XamlRoot);
+            }
+        }
+        private async Task CarregarConfiguracoesAsync()
         {
             try
             {
                 if (!File.Exists(_configFilePath))
                 {
-                    var defaultConfig = new AppConfig
-                    {
-                        CaminhoDestino = "",
-                        NomePadrao = "",
-                        OrigemArquivos = new List<string>(),
-                        HabilitarNomePadrao = false,
-                    };
-
-                    await File.WriteAllTextAsync(_configFilePath, JsonSerializer.Serialize(defaultConfig));
+                    config = new AppConfig();
+                    await File.WriteAllTextAsync(_configFilePath, JsonSerializer.Serialize(config));
+                }
+                else
+                {
+                    var json = await File.ReadAllTextAsync(_configFilePath);
+                    config = JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
                 }
 
-                var json = await File.ReadAllTextAsync(_configFilePath);
-                config = JsonSerializer.Deserialize<AppConfig>(json);
-
                 BindPrincipal();
-                CarregarArquivosDaOrigem();
+                await CarregarArquivosDaOrigemAsync();
             }
             catch (Exception ex)
             {
                 await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
             }
         }
-        private async void CarregarArquivosDaOrigem()
+
+
+        private async Task CarregarArquivosDaOrigemAsync()
         {
             try
             {
                 arquivos.Clear();
-                var caminhosInvalidos = new List<string>();
+                var invalidPaths = new List<string>();
 
-                foreach (var caminho in config.OrigemArquivos)
+                foreach (var path in config.OrigemArquivos)
                 {
-                    if (File.Exists(caminho))
+                    try
                     {
-                        arquivos.Add(new FileInfo(caminho));
+                        var file = await StorageFile.GetFileFromPathAsync(path);
+                        var futureAccess = StorageApplicationPermissions.FutureAccessList.Add(file);
+                        arquivos.Add(new FileItem
+                        {
+                            Name = file.Name,
+                            Path = file.Path,
+                            FutureAccessToken = futureAccess
+                        });
                     }
-                    else
+                    catch
                     {
-                        caminhosInvalidos.Add(caminho);
+                        invalidPaths.Add(path);
                     }
                 }
 
-                if (caminhosInvalidos.Any())
+                if (invalidPaths.Any())
                 {
-                    foreach (var caminho in caminhosInvalidos)
-                        config.OrigemArquivos.Remove(caminho);
+                    foreach (var path in invalidPaths)
+                        config.OrigemArquivos.Remove(path);
 
                     await SalvarConfiguracoes();
                 }
 
-                if (arquivos.Count == 0)
-                {
-                    await Mensagem.AvisoAsync("Nenhum arquivo válido encontrado nas origens selecionadas.", this.Content.XamlRoot);
-                }
-                else
-                {
-                    await Mensagem.SucessoAsync("Arquivo adicionado com sucesso.", this.Content.XamlRoot);
-                }
+                Arquivos_CollectionChanged(null, null);
             }
             catch (Exception ex)
             {
-                await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
-                arquivos.Clear();
+                await Mensagem.ErroAsync($"Erro ao carregar arquivos: {ex.Message}", this.Content.XamlRoot);
             }
         }
+
+        private async Task<bool> Copiar(FileItem arquivo)
+        {
+            try
+            {
+                var sourceFile = await arquivo.GetStorageFileAsync();
+                if (sourceFile == null) return false;
+
+                var destinationFolder = await StorageFolder.GetFolderFromPathAsync(config.CaminhoDestino);
+                string fileName = config.HabilitarNomePadrao && !string.IsNullOrEmpty(config.NomePadrao)
+                    ? config.NomePadrao + sourceFile.FileType
+                    : sourceFile.Name;
+
+                await sourceFile.CopyAsync(destinationFolder, fileName, NameCollisionOption.ReplaceExisting);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Erro ao copiar: {ex}");
+                return false;
+            }
+        }
+        private async Task<bool> ValidarCaminhoDestino()
+        {
+            if (string.IsNullOrWhiteSpace(config.CaminhoDestino))
+            {
+                await Mensagem.AvisoAsync("Selecione uma pasta de destino.", this.Content.XamlRoot);
+                return false;
+            }
+
+            try
+            {
+                await StorageFolder.GetFolderFromPathAsync(config.CaminhoDestino);
+                return true;
+            }
+            catch
+            {
+                await Mensagem.AvisoAsync("Pasta de destino inválida.", this.Content.XamlRoot);
+                return false;
+            }
+        }
+
         private async Task SalvarConfiguracoes()
         {
             try
@@ -431,48 +454,6 @@ namespace GerenciarArquivo
             WindowId wndId = Win32Interop.GetWindowIdFromWindow(hWnd);
             return AppWindow.GetFromWindowId(wndId);
         }
-        private async Task<bool> Copiar(FileInfo arquivoOrigem)
-        {
-            string nomeArquivoDeDestino = arquivoOrigem.Name;
-
-            if (config.NomePadrao.ObterValorOuPadrao("").Trim() != "" && chkNomePadrao.IsChecked == true)
-                nomeArquivoDeDestino = config.NomePadrao;
-
-            if (!nomeArquivoDeDestino.EndsWith(arquivoOrigem.Extension, StringComparison.OrdinalIgnoreCase))
-                nomeArquivoDeDestino += arquivoOrigem.Extension;
-
-            string destinationPath = Path.Combine(config.CaminhoDestino, nomeArquivoDeDestino);
-
-            try
-            {
-                File.Copy(arquivoOrigem.FullName, destinationPath, overwrite: true);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-        private async Task<bool> ValidarCaminhoDestino()
-        {
-            if (config.CaminhoDestino.ObterValorOuPadrao("").Trim() == "")
-            {
-                await Mensagem.AvisoAsync("Selecione uma pasta de destino antes de continuar.", this.Content.XamlRoot);
-                return false;
-            }
-
-            if (!Directory.Exists(config.CaminhoDestino))
-            {
-                await Mensagem.AvisoAsync("A pasta de destino selecionada não foi encontrada.", this.Content.XamlRoot);
-                return false;
-            }
-
-            return true;
-        }
-        private void AtualizarStatus()
-        {
-            txtQtdTotal.Text = arquivos.Count.ToString("N0");
-        }
         #endregion
     }
 
@@ -482,5 +463,27 @@ namespace GerenciarArquivo
         public string CaminhoDestino { get; set; } = "";
         public string NomePadrao { get; set; } = "";
         public bool HabilitarNomePadrao { get; set; } = false;
+    }
+
+    public class FileItem
+    {
+        public string Name { get; set; }
+        public string Path { get; set; }
+        public string FutureAccessToken { get; set; }
+
+        public async Task<StorageFile> GetStorageFileAsync()
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(FutureAccessToken))
+                    return await StorageApplicationPermissions.FutureAccessList.GetFileAsync(FutureAccessToken);
+
+                return await StorageFile.GetFileFromPathAsync(Path);
+            }
+            catch
+            {
+                return null;
+            }
+        }
     }
 }
