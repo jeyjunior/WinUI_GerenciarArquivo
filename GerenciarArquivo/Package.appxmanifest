@@ -10,7 +10,7 @@
   <Identity
     Name="JeyJr.GerenciarArquivos"
     Publisher="CN=53663670-79F2-45CB-8E00-C8EA1BF62707"
-    Version="1.0.1.0" />
+    Version="1.0.2.0" />
 
   <mp:PhoneIdentity PhoneProductId="b0f2a739-17df-4f25-bb25-a7498c30173a" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 

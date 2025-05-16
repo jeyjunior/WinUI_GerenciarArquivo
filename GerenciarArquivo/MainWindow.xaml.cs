@@ -26,6 +26,7 @@ using System.Collections.Specialized;
 using System.Diagnostics;
 using JJ.NET.Core.DTO;
 using Windows.Storage.AccessCache;
+using System.Text;
 
 namespace GerenciarArquivo
 {
@@ -46,6 +47,7 @@ namespace GerenciarArquivo
         #endregion
 
         #region Eventos 
+        
         private void Arquivos_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
         {
             txtQtdTotal.Text = "Total: " + arquivos.Count.ToString("N0");
@@ -215,26 +217,58 @@ namespace GerenciarArquivo
                     return;
                 }
 
-                int success = 0, errors = 0;
+                // Verificar antecipadamente se precisamos de permissões elevadas
+                bool precisaElevacao = await VerificarSePrecisaElevacao();
 
-                foreach (var item in arquivos.ToList())
+                if (precisaElevacao)
                 {
-                    if (await Copiar(item)) success++;
-                    else errors++;
+                    var confirmacao = await ConfirmacaoAsync(
+                        "Esta operação requer permissões de administrador. Deseja continuar?",
+                        this.Content.XamlRoot);
+
+                    if (!confirmacao) return;
                 }
 
-                if (success > 0)
-                    await Mensagem.SucessoAsync($"{success} arquivo(s) copiado(s).", this.Content.XamlRoot);
+                int success = 0, errors = 0;
 
-                if (errors > 0)
-                    await Mensagem.ErroAsync($"{errors} arquivo(s) não puderam ser copiados.", this.Content.XamlRoot);
+                if (precisaElevacao)
+                {
+                    // Executa todos os arquivos em uma única operação elevada
+                    var resultado = await CopiarComElevacao(arquivos.ToList());
+
+                    if (resultado)
+                    {
+                        success = arquivos.Count;
+                        await Mensagem.SucessoAsync($"{success} arquivo(s) copiado(s) com permissões elevadas.",
+                                                  this.Content.XamlRoot);
+                    }
+                    else
+                    {
+                        errors = arquivos.Count;
+                        await Mensagem.ErroAsync("Não foi possível copiar os arquivos.", this.Content.XamlRoot);
+                    }
+                }
+                else
+                {
+                    // Cópia normal sem elevação
+                    foreach (var item in arquivos.ToList())
+                    {
+                        if (await Copiar(item, false)) success++;
+                        else errors++;
+                    }
+
+                    if (success > 0)
+                        await Mensagem.SucessoAsync($"{success} arquivo(s) copiado(s).", this.Content.XamlRoot);
+
+                    if (errors > 0)
+                        await Mensagem.ErroAsync($"{errors} arquivo(s) não puderam ser copiados.", this.Content.XamlRoot);
+                }
             }
             catch (Exception ex)
             {
                 await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
             }
         }
-
         private async void txtNomePadrao_LostFocus(object sender, RoutedEventArgs e)
         {
             try
@@ -344,8 +378,6 @@ namespace GerenciarArquivo
                 await Mensagem.ErroAsync(ex.Message, this.Content.XamlRoot);
             }
         }
-
-
         private async Task CarregarArquivosDaOrigemAsync()
         {
             try
@@ -387,8 +419,7 @@ namespace GerenciarArquivo
                 await Mensagem.ErroAsync($"Erro ao carregar arquivos: {ex.Message}", this.Content.XamlRoot);
             }
         }
-
-        private async Task<bool> Copiar(FileItem arquivo)
+        private async Task<bool> Copiar(FileItem arquivo, bool perguntarElevacao = true)
         {
             try
             {
@@ -400,14 +431,86 @@ namespace GerenciarArquivo
                     ? config.NomePadrao + sourceFile.FileType
                     : sourceFile.Name;
 
-                await sourceFile.CopyAsync(destinationFolder, fileName, NameCollisionOption.ReplaceExisting);
-                return true;
+                try
+                {
+                    await sourceFile.CopyAsync(destinationFolder, fileName, NameCollisionOption.ReplaceExisting);
+                    return true;
+                }
+                catch (UnauthorizedAccessException) when (perguntarElevacao)
+                {
+                    var result = await ConfirmacaoAsync(
+                        "Esta operação requer permissões de administrador. Deseja continuar?",
+                        this.Content.XamlRoot);
+
+                    if (result) return await CopiarComElevacao(new List<FileItem>() { new FileItem { Path = sourceFile.Path, Name = sourceFile.Name } });
+                    return false;
+                }
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"Erro ao copiar: {ex}");
                 return false;
             }
+        }
+        private async Task<bool> CopiarComElevacao(List<FileItem> arquivos)
+        {
+            try
+            {
+                // Criar um arquivo batch temporário
+                var batchFile = Path.GetTempFileName() + ".bat";
+                var batchContent = new StringBuilder();
+
+                foreach (var arquivo in arquivos)
+                {
+                    var sourceFile = await arquivo.GetStorageFileAsync();
+                    if (sourceFile == null) continue;
+
+                    string fileName = config.HabilitarNomePadrao && !string.IsNullOrEmpty(config.NomePadrao)
+                        ? config.NomePadrao + sourceFile.FileType
+                        : sourceFile.Name;
+
+                    batchContent.AppendLine($"copy \"{sourceFile.Path}\" \"{Path.Combine(config.CaminhoDestino, fileName)}\"");
+                }
+
+                await File.WriteAllTextAsync(batchFile, batchContent.ToString());
+
+                // Executar o batch com elevação
+                var processInfo = new ProcessStartInfo
+                {
+                    Verb = "runas",
+                    FileName = "cmd.exe",
+                    Arguments = $"/c \"{batchFile}\"",
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    UseShellExecute = true
+                };
+
+                var process = Process.Start(processInfo);
+                await Task.Run(() => process.WaitForExit());
+
+                // Limpar - deletar o arquivo batch
+                File.Delete(batchFile);
+
+                return process.ExitCode == 0;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Erro na cópia elevada em lote: {ex}");
+                return false;
+            }
+        }
+        public static async Task<bool> ConfirmacaoAsync(string mensagem, XamlRoot xamlRoot)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Confirmação",
+                Content = mensagem,
+                PrimaryButtonText = "Sim",
+                SecondaryButtonText = "Não",
+                XamlRoot = xamlRoot
+            };
+
+            var result = await dialog.ShowAsync();
+            return result == ContentDialogResult.Primary;
         }
         private async Task<bool> ValidarCaminhoDestino()
         {
@@ -428,7 +531,6 @@ namespace GerenciarArquivo
                 return false;
             }
         }
-
         private async Task SalvarConfiguracoes()
         {
             try
@@ -454,6 +556,31 @@ namespace GerenciarArquivo
             WindowId wndId = Win32Interop.GetWindowIdFromWindow(hWnd);
             return AppWindow.GetFromWindowId(wndId);
         }
+        private async Task<bool> VerificarSePrecisaElevacao()
+        {
+            try
+            {
+                // Tentar criar um arquivo temporário na pasta de destino para testar permissões
+                var testFile = Path.Combine(config.CaminhoDestino, $"teste_permissao_{Guid.NewGuid()}.tmp");
+
+                try
+                {
+                    // Tentativa normal
+                    using (File.Create(testFile)) { }
+                    File.Delete(testFile);
+                    return false;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         #endregion
     }
 
